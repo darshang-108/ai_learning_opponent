@@ -194,6 +194,59 @@ PERSONALITY_MAGE = {
     "uses_projectiles": True,
 }
 
+# ── New personality archetypes ────────────────────────────
+PERSONALITY_TACTICIAN = {
+    "attack_frequency": 0.9,
+    "dodge_probability": 0.30,
+    "retreat_tendency": 0.40,
+    "aggression": 0.50,
+    "buff_use_chance": 0.25,
+    "combo_extension": 0.35,
+    "risk_tolerance": 0.30,
+}
+PERSONALITY_AGGRESSOR = {
+    "attack_frequency": 1.7,
+    "dodge_probability": 0.10,
+    "retreat_tendency": 0.05,
+    "aggression": 0.90,
+    "buff_use_chance": 0.15,
+    "combo_extension": 0.70,
+    "risk_tolerance": 0.85,
+}
+PERSONALITY_DEFENDER = {
+    "attack_frequency": 0.6,
+    "dodge_probability": 0.15,
+    "retreat_tendency": 0.25,
+    "aggression": 0.30,
+    "buff_use_chance": 0.35,
+    "combo_extension": 0.20,
+    "risk_tolerance": 0.15,
+}
+PERSONALITY_PREDATOR = {
+    "attack_frequency": 1.4,
+    "dodge_probability": 0.20,
+    "retreat_tendency": 0.10,
+    "aggression": 0.80,
+    "buff_use_chance": 0.20,
+    "combo_extension": 0.55,
+    "risk_tolerance": 0.70,
+}
+PERSONALITY_ADAPTIVE = {
+    "attack_frequency": 1.0,
+    "dodge_probability": 0.25,
+    "retreat_tendency": 0.30,
+    "aggression": 0.55,
+    "buff_use_chance": 0.30,
+    "combo_extension": 0.40,
+    "risk_tolerance": 0.50,
+}
+
+# ── Personality selection tuning ──────────────────────────
+SELECTION_TEMPERATURE = 0.6        # softmax temperature (lower → more greedy)
+SELECTION_MIN_PLAYS = 3            # min matches before exploitation
+SELECTION_RECENCY_PENALTY = 0.10   # WR penalty for just-used personality
+SELECTION_EPSILON = 0.15           # hard exploration probability
+
 # ── PVP settings ──────────────────────────────────────────
 PVP_P1_UP = "w"
 PVP_P1_DOWN = "s"

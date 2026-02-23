@@ -66,12 +66,17 @@ from ai.ai_system import (
 # ══════════════════════════════════════════════════════════
 
 BLOCK_PROFILES: dict[str, float] = {
-    "Duelist":   0.65,   # high block chance
-    "Balanced":  0.40,
-    "Berserker": 0.15,
-    "Trickster": 0.30,   # may dodge instead
-    "Coward":    0.50,
-    "Mage":      0.35,
+    "Duelist":    0.65,   # high block chance
+    "Balanced":   0.40,
+    "Berserker":  0.15,
+    "Trickster":  0.30,   # may dodge instead
+    "Coward":     0.50,
+    "Mage":       0.35,
+    "Tactician":  0.45,   # reads and blocks
+    "Aggressor":  0.10,   # rarely blocks, prefers offense
+    "Defender":   0.70,   # blocks most attacks
+    "Predator":   0.25,   # blocks sparingly, strikes low-HP
+    "Adaptive":   0.35,   # shifts dynamically
 }
 
 

@@ -2,16 +2,23 @@
 ai_system.py – Personality-based AI with adaptive behavior.
 
 Personality types:
-- Berserker: aggressive, rarely dodges, never retreats
-- Duelist:   balanced, precise, reads opponent
-- Coward:    evasive, runs, uses buffs defensively
-- Trickster: unpredictable, feints, abuses buffs
+- Berserker:  aggressive, rarely dodges, never retreats
+- Duelist:    balanced, precise, reads opponent
+- Coward:     evasive, runs, uses buffs defensively
+- Trickster:  unpredictable, feints, abuses buffs
+- Mage:       ranged caster, projectile-focused
+- Tactician:  spacing and zoning, baits before punishing
+- Aggressor:  high combo chaining, forward pressure
+- Defender:   high block, counter-attack focused
+- Predator:   aggressive when player HP is low, finisher mentality
+- Adaptive:   shifts personality mid-match based on player behavior
 
 Each personality influences:
-- Attack frequency
+- Attack frequency / aggression
 - Dodge probability
 - Retreat logic
 - Buff usage
+- Combo extension / risk tolerance
 
 Integrates with the existing adaptive archetype system
 (BehaviorAnalyzer, persistence, stats).
@@ -36,6 +43,8 @@ from settings import (
     PERSONALITY_BERSERKER, PERSONALITY_DUELIST,
     PERSONALITY_COWARD, PERSONALITY_TRICKSTER,
     PERSONALITY_MAGE,
+    PERSONALITY_TACTICIAN, PERSONALITY_AGGRESSOR,
+    PERSONALITY_DEFENDER, PERSONALITY_PREDATOR, PERSONALITY_ADAPTIVE,
     DODGE_SPEED, DODGE_DURATION,
     PROJECTILE_COOLDOWN, PROJECTILE_DAMAGE, PROJECTILE_SPEED,
     DUELIST_DAMAGE_MULT, DUELIST_QUICK_COOLDOWN, DUELIST_HEAVY_COOLDOWN,
@@ -43,6 +52,8 @@ from settings import (
     DUELIST_COUNTER_WINDOW, DUELIST_COUNTER_DAMAGE,
     DUELIST_COMBO_WINDOW, DUELIST_COMBO_DAMAGE,
     DUELIST_LUNGE_IMPULSE, DUELIST_CHASE_SPEED_MULT,
+    SELECTION_TEMPERATURE, SELECTION_MIN_PLAYS,
+    SELECTION_RECENCY_PENALTY, SELECTION_EPSILON,
 )
 from ai.persistence import load_archetype_stats, get_win_rate
 
@@ -62,25 +73,37 @@ class Personality:
         self.aggression: float = params.get("aggression", 0.5)
         self.buff_use_chance: float = params.get("buff_use_chance", 0.3)
         self.uses_projectiles: bool = params.get("uses_projectiles", False)
+        # Extended attributes for new archetypes
+        self.combo_extension: float = params.get("combo_extension", 0.30)
+        self.risk_tolerance: float = params.get("risk_tolerance", 0.50)
 
 
 PERSONALITIES: dict[str, Personality] = {
-    "Berserker": Personality("Berserker", PERSONALITY_BERSERKER),
-    "Duelist":   Personality("Duelist",   PERSONALITY_DUELIST),
-    "Coward":    Personality("Coward",    PERSONALITY_COWARD),
-    "Trickster": Personality("Trickster", PERSONALITY_TRICKSTER),
-    "Mage":      Personality("Mage",      PERSONALITY_MAGE),
+    "Berserker":  Personality("Berserker",  PERSONALITY_BERSERKER),
+    "Duelist":    Personality("Duelist",     PERSONALITY_DUELIST),
+    "Coward":     Personality("Coward",      PERSONALITY_COWARD),
+    "Trickster":  Personality("Trickster",   PERSONALITY_TRICKSTER),
+    "Mage":       Personality("Mage",        PERSONALITY_MAGE),
+    "Tactician":  Personality("Tactician",   PERSONALITY_TACTICIAN),
+    "Aggressor":  Personality("Aggressor",   PERSONALITY_AGGRESSOR),
+    "Defender":   Personality("Defender",    PERSONALITY_DEFENDER),
+    "Predator":   Personality("Predator",    PERSONALITY_PREDATOR),
+    "Adaptive":   Personality("Adaptive",    PERSONALITY_ADAPTIVE),
 }
 
-# Map player styles from BehaviorAnalyzer to personality pools
+# Map player styles from BehaviorAnalyzer to personality pools.
+# Every pool contains enough variety that no single personality
+# can dominate through pool membership alone.
 STYLE_TO_PERSONALITIES: dict[str, list[str]] = {
-    "Aggressive": ["Duelist", "Coward", "Mage"],    # counter aggression
-    "Defensive":  ["Berserker", "Trickster", "Mage"],  # break defense
-    "Balanced":   ["Duelist", "Trickster", "Mage"],  # versatile
-    "Unknown":    ["Berserker", "Duelist", "Coward", "Trickster", "Mage"],
+    "Aggressive": ["Duelist", "Coward", "Mage", "Defender", "Tactician"],
+    "Defensive":  ["Berserker", "Trickster", "Mage", "Aggressor", "Predator"],
+    "Balanced":   ["Duelist", "Trickster", "Tactician", "Adaptive", "Predator"],
+    "Evasive":    ["Aggressor", "Predator", "Berserker", "Tactician", "Mage"],
+    "Unknown":    list(PERSONALITIES.keys()),
 }
 
-_EPSILON = 0.2  # exploration rate for personality selection
+# Last personality used (for recency penalty)
+_last_selected: str | None = None
 
 
 # ══════════════════════════════════════════════════════════
@@ -193,33 +216,97 @@ class DuelistBehavior:
 #  Personality Selection (integrates with BehaviorAnalyzer)
 # ══════════════════════════════════════════════════════════
 
-def select_personality(player_style: str) -> Personality:
-    """Select enemy personality based on detected player style.
-    Uses epsilon-greedy with persistence data.
+def _softmax_scores(scores: list[float], temperature: float) -> list[float]:
+    """Convert raw scores into softmax probabilities.
+
+    Uses temperature scaling – lower temperature → more greedy,
+    higher temperature → more uniform.
     """
+    if temperature <= 0:
+        temperature = 0.01
+    scaled = [s / temperature for s in scores]
+    max_s = max(scaled)
+    exps = [math.exp(s - max_s) for s in scaled]  # shift for numerical stability
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
+def select_personality(player_style: str) -> Personality:
+    """Select enemy personality using softmax + UCB exploration.
+
+    Algorithm:
+    1. Hard epsilon exploration – with probability SELECTION_EPSILON,
+       pick a uniformly random personality from the pool.
+    2. Otherwise compute an *adjusted score* for each personality:
+       - Base = win rate from persistence data
+       - UCB bonus for under-played personalities (< SELECTION_MIN_PLAYS)
+       - Recency penalty if this personality was just used
+    3. Feed adjusted scores into a softmax with SELECTION_TEMPERATURE
+       and sample probabilistically.
+
+    This prevents any single personality from dominating while still
+    favoring higher-performing ones.
+    """
+    global _last_selected
+
     pool_names = STYLE_TO_PERSONALITIES.get(player_style,
                                              list(PERSONALITIES.keys()))
 
-    # Explore
-    if random.random() < _EPSILON:
+    # Hard epsilon exploration
+    if random.random() < SELECTION_EPSILON:
         name = random.choice(pool_names)
-        logger.info("Personality EXPLORE → %s", name)
+        logger.info("Personality EXPLORE (epsilon) → %s", name)
+        _last_selected = name
         return PERSONALITIES[name]
 
-    # Exploit: pick best win-rate personality from pool
+    # Load persistent performance data
     data = load_archetype_stats()
-    best_name = pool_names[0]
-    best_rate = -1.0
+
+    # Compute total matches across all personalities
+    total_matches = sum(
+        data.get(n, {}).get("matches", 0) for n in pool_names
+    )
+
+    # Build adjusted scores for each personality in the pool
+    scores: list[float] = []
     for name in pool_names:
-        rate = get_win_rate(name, data)
-        if rate > best_rate:
-            best_rate = rate
-            best_name = name
+        entry = data.get(name, {})
+        matches = entry.get("matches", 0)
+        wr = get_win_rate(name, data)  # wins / max(1, matches)
 
-    if best_rate <= 0:
-        name = random.choice(pool_names)
-        logger.info("Personality no-data fallback → %s", name)
-        return PERSONALITIES[name]
+        # UCB exploration bonus for under-played personalities
+        if matches < SELECTION_MIN_PLAYS:
+            # Give a generous bonus so it gets explored
+            ucb_bonus = 0.5 * math.sqrt(
+                math.log(max(total_matches, 1) + 1) / max(matches, 1)
+            )
+        else:
+            ucb_bonus = 0.0
 
-    logger.info("Personality EXPLOIT → %s (wr=%.2f)", best_name, best_rate)
-    return PERSONALITIES[best_name]
+        # Recency penalty – discourage picking the same personality twice
+        recency = SELECTION_RECENCY_PENALTY if name == _last_selected else 0.0
+
+        score = wr + ucb_bonus - recency
+        scores.append(score)
+
+    # Softmax probabilistic selection
+    probs = _softmax_scores(scores, SELECTION_TEMPERATURE)
+
+    # Weighted random selection
+    r = random.random()
+    cumulative = 0.0
+    chosen_name = pool_names[-1]
+    for name, prob in zip(pool_names, probs):
+        cumulative += prob
+        if r <= cumulative:
+            chosen_name = name
+            break
+
+    _last_selected = chosen_name
+    logger.info(
+        "Personality SOFTMAX → %s (scores=%s, probs=%s)",
+        chosen_name,
+        {n: f"{s:.3f}" for n, s in zip(pool_names, scores)},
+        {n: f"{p:.3f}" for n, p in zip(pool_names, probs)},
+    )
+    return PERSONALITIES[chosen_name]

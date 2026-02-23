@@ -2,8 +2,8 @@
 pvp_system.py – Local multiplayer PVP mode.
 
 Requirements:
-- Player 1: WASD + F/G/H (attack/block/dodge)
-- Player 2: Arrow keys + Numpad 1/2/3 (attack/block/dodge)
+- Player 1: Rebindable via keybinds.py (default WASD + F/G/H)
+- Player 2: Rebindable via keybinds.py (default Arrows + Numpad)
 - Shared arena
 - Independent stamina, buffs, personality
 - Option to enable/disable AI for either player
@@ -20,33 +20,30 @@ from settings import (
     ARENA_FLOOR_Y, BLUE, RED, PLAYER_MAX_HP, PLAYER_SPEED,
     PLAYER_ATTACK_COOLDOWN, STAMINA_MAX,
 )
+from keybinds import PVP_P1_KEYS, PVP_P2_KEYS
 
 import time
 
 
 # ══════════════════════════════════════════════════════════
-#  Key Bindings
+#  Key Binding Adapters
 # ══════════════════════════════════════════════════════════
 
-P1_KEYS = {
-    "up":     pygame.K_w,
-    "down":   pygame.K_s,
-    "left":   pygame.K_a,
-    "right":  pygame.K_d,
-    "attack": pygame.K_f,
-    "block":  pygame.K_g,
-    "dodge":  pygame.K_h,
-}
+def _build_pvp_keys(src: dict[str, int]) -> dict[str, int]:
+    """Map keybinds action names to PVP internal names.
 
-P2_KEYS = {
-    "up":     pygame.K_UP,
-    "down":   pygame.K_DOWN,
-    "left":   pygame.K_LEFT,
-    "right":  pygame.K_RIGHT,
-    "attack": pygame.K_KP1,
-    "block":  pygame.K_KP2,
-    "dodge":  pygame.K_KP3,
-}
+    Called fresh each time a PVPManager is created so any
+    rebinds made in the Controls menu are immediately active.
+    """
+    return {
+        "up":     src["move_up"],
+        "down":   src["move_down"],
+        "left":   src["move_left"],
+        "right":  src["move_right"],
+        "attack": src["quick_attack"],
+        "block":  src["block"],
+        "dodge":  src["dodge"],
+    }
 
 
 # ══════════════════════════════════════════════════════════
@@ -193,7 +190,7 @@ class PVPManager:
             facing=1,
             color=BLUE,
             accent=(180, 200, 255),
-            keys=P1_KEYS,
+            keys=_build_pvp_keys(PVP_P1_KEYS),
         )
         self.p2 = PVPFighter(
             player_id=2,
@@ -201,7 +198,7 @@ class PVPManager:
             facing=-1,
             color=RED,
             accent=(255, 180, 180),
-            keys=P2_KEYS,
+            keys=_build_pvp_keys(PVP_P2_KEYS),
         )
         self.round_over = False
         self.winner: PVPFighter | None = None

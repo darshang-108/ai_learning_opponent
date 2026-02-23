@@ -15,7 +15,7 @@ Integrates all systems:
 
 Run:  python main.py
 """
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 import pygame
 import sys
@@ -60,6 +60,7 @@ from avatar_generator import (
     pick_image_file, cleanup_original, _HAS_DEPS as _AVATAR_DEPS_OK,
 )
 from audio_manager import AudioManager
+from keybinds import SOLO_KEYS, ControlsMenu
 
 
 # ══════════════════════════════════════════════════════════
@@ -83,6 +84,7 @@ def _draw_mode_select(screen: pygame.Surface):
     options = [
         ("1.  Solo vs AI", (180, 200, 255)),
         ("2.  Local PVP (2 Players)", (255, 200, 180)),
+        ("3.  Controls", (200, 255, 200)),
     ]
     y = 220
     for text, color in options:
@@ -91,7 +93,7 @@ def _draw_mode_select(screen: pygame.Surface):
         y += 55
 
     hint = hint_font.render(
-        "Press 1 or 2 to select  |  ESC to quit", True, (140, 140, 140),
+        "Press 1, 2, or 3 to select  |  ESC to quit", True, (140, 140, 140),
     )
     screen.blit(hint, (cx - hint.get_width() // 2, SCREEN_HEIGHT - 50))
     pygame.display.flip()
@@ -339,6 +341,8 @@ class Game:
                     self._mode = "pvp"
                     self._show_mode_select = False
                     self._start_pvp()
+                elif event.key == pygame.K_3:
+                    self._open_controls_menu()
                 elif event.key == pygame.K_ESCAPE:
                     self.game_state = "MENU"
 
@@ -347,6 +351,11 @@ class Game:
         self.pvp_manager = PVPManager()
         self.pvp_manager.start_round()
         self.game_over = False
+
+    def _open_controls_menu(self):
+        """Open the full-screen controls rebinding UI."""
+        menu = ControlsMenu()
+        menu.run(self.screen, self.clock)
 
     # ── PVP event / update / draw ─────────────────────────
 
@@ -520,12 +529,12 @@ class Game:
                 self.running = False
 
             if event.type == pygame.KEYDOWN:
-                # Attack on SPACE
-                if event.key == pygame.K_SPACE and not self.game_over:
+                # Quick attack
+                if event.key == SOLO_KEYS["quick_attack"] and not self.game_over:
                     self._player_attack()
 
-                # Dodge on Z
-                if event.key == pygame.K_z and not self.game_over:
+                # Dodge
+                if event.key == SOLO_KEYS["dodge"] and not self.game_over:
                     keys = pygame.key.get_pressed()
                     if self.player is not None and self.player.try_dodge(keys):
                         self.audio.play_sfx("combo_whoosh",
@@ -673,7 +682,7 @@ class Game:
         self.player.handle_input(keys)
 
         # Block (held key)
-        block_pressed = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
+        block_pressed = keys[SOLO_KEYS["block"]]
         was_blocking = self.player.is_blocking
         self.player.try_block(block_pressed)
 
@@ -687,8 +696,8 @@ class Game:
         self.player.update_animation(dt)
 
         # Log movement
-        if any(keys[k] for k in (pygame.K_LEFT, pygame.K_RIGHT,
-                                  pygame.K_UP, pygame.K_DOWN)):
+        if any(keys[k] for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
+                                  SOLO_KEYS["move_up"], SOLO_KEYS["move_down"])):
             self.logger.log_movement()
 
         # ── Stamina system update ────────────────────────
@@ -704,8 +713,8 @@ class Game:
 
         # Pass player activity info to enemy
         player_is_active = (
-            any(keys[k] for k in (pygame.K_LEFT, pygame.K_RIGHT,
-                                  pygame.K_UP, pygame.K_DOWN))
+            any(keys[k] for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
+                                  SOLO_KEYS["move_up"], SOLO_KEYS["move_down"]))
             or self.player.is_attacking
         )
         self.enemy.clock_dt = dt

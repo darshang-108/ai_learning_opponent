@@ -563,6 +563,8 @@ class Character:
             if self.anim_timer >= self.hurt_duration:
                 self.anim_state = "idle"
                 self.anim_timer = 0.0
+                # Safety: ensure attack flag is cleared after hurt
+                self.is_attacking = False
         elif self.anim_state == "block":
             apply_block_animation(self.parts, self.facing)
         elif self.anim_state == "attack":
@@ -603,6 +605,10 @@ class Character:
     def start_block(self):
         if self.anim_state == "death":
             return
+        # Cancel any in-progress attack
+        if self.is_attacking:
+            self.is_attacking = False
+            self._attack_hitbox = None
         self.is_blocking = True
         self.anim_state = "block"
 
@@ -616,6 +622,10 @@ class Character:
         if self.anim_state == "death" or self.dodge_cooldown_timer > 0:
             return False
         from settings import DODGE_DURATION, DODGE_COOLDOWN, DODGE_IFRAMES
+        # Cancel any in-progress attack
+        if self.is_attacking:
+            self.is_attacking = False
+            self._attack_hitbox = None
         self.is_dodging = True
         self.dodge_timer = DODGE_DURATION
         self.dodge_dir = direction
@@ -643,9 +653,15 @@ class Character:
         if self.hp <= 0:
             self.anim_state = "death"
             self.anim_timer = 0.0
+            # Clear combat flags so stamina regen isn't blocked forever
+            self.is_attacking = False
+            self._attack_hitbox = None
         elif self.anim_state != "death":
             self.anim_state = "hurt"
             self.anim_timer = 0.0
+            # Clear combat flags so stamina regen isn't blocked forever
+            self.is_attacking = False
+            self._attack_hitbox = None
         return actual
 
     def apply_knockback(self, vx: float, vy: float = 0.0):

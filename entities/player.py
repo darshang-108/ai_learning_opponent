@@ -16,6 +16,7 @@ from settings import (
 from entities.character import Character
 from systems.stamina_system import StaminaComponent
 from systems.buff_system import BuffManager
+from keybinds import SOLO_KEYS
 
 
 class Player(Character):
@@ -57,13 +58,13 @@ class Player(Character):
         if self.buff_manager:
             speed = self.buff_manager.modify_speed(speed)
 
-        if keys[pygame.K_LEFT]:
+        if keys[SOLO_KEYS["move_left"]]:
             self.rect.x -= int(speed)
-        if keys[pygame.K_RIGHT]:
+        if keys[SOLO_KEYS["move_right"]]:
             self.rect.x += int(speed)
-        if keys[pygame.K_UP]:
+        if keys[SOLO_KEYS["move_up"]]:
             self.rect.y -= int(speed)
-        if keys[pygame.K_DOWN]:
+        if keys[SOLO_KEYS["move_down"]]:
             self.rect.y += int(speed)
 
         # Dodge movement
@@ -119,9 +120,9 @@ class Player(Character):
         if not self.stamina_component.drain_dodge():
             return False
         # Direction based on movement keys
-        if keys[pygame.K_LEFT]:
+        if keys[SOLO_KEYS["move_left"]]:
             direction = -1
-        elif keys[pygame.K_RIGHT]:
+        elif keys[SOLO_KEYS["move_right"]]:
             direction = 1
         else:
             direction = -self.facing  # dodge backward

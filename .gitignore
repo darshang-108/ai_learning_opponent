@@ -28,6 +28,7 @@ Thumbs.db
 # ── Generated data (runtime) ─────────────────────────────
 player_data.csv
 archetype_stats.json
+controls.json
 aggression_trend.png
 
 # ── Avatar cache ─────────────────────────────────────────

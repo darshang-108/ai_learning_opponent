@@ -19,10 +19,10 @@ _JSON_PATH = os.path.join(
     "archetype_stats.json",
 )
 
-# Canonical list of all archetypes (must match enemy.py ARCHETYPES keys)
+# Canonical list of all archetypes (must match ai_system.py PERSONALITIES keys)
 _ALL_ARCHETYPES = [
-    "Berserker", "Sniper", "Duelist", "Trickster",
-    "Predator", "Rushdown", "Tactician",
+    "Berserker", "Duelist", "Coward", "Trickster", "Mage",
+    "Tactician", "Aggressor", "Defender", "Predator", "Adaptive",
 ]
 
 
