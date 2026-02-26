@@ -105,6 +105,9 @@ STYLE_TO_PERSONALITIES: dict[str, list[str]] = {
 # Last personality used (for recency penalty)
 _last_selected: str | None = None
 
+# Cached softmax probabilities from the most recent selection.
+# Dict mapping personality name → probability.  Read-only for debug/overlay.
+last_softmax_probs: dict[str, float] = {}
 
 # ══════════════════════════════════════════════════════════
 #  Duelist Behavior Module
@@ -303,6 +306,11 @@ def select_personality(player_style: str) -> Personality:
             break
 
     _last_selected = chosen_name
+
+    # Persist softmax probs for debug overlay
+    global last_softmax_probs
+    last_softmax_probs = {n: p for n, p in zip(pool_names, probs)}
+
     logger.info(
         "Personality SOFTMAX → %s (scores=%s, probs=%s)",
         chosen_name,

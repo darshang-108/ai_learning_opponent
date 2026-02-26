@@ -156,6 +156,50 @@ class CombatSystem:
         return result
 
     # ══════════════════════════════════════════════════════
+    #  Player Projectile → Enemy (magic ability)
+    # ══════════════════════════════════════════════════════
+
+    def player_projectile_hit(self, player, enemy, raw_damage: int) -> CombatResult:
+        """Resolve a player projectile hitting the enemy.
+
+        Applies role damage multiplier and buff modifiers, respects
+        blocking / invulnerability, but skips hitbox/range checks
+        (collision was already confirmed by ProjectileSystem).
+        """
+        result = CombatResult()
+
+        # Invulnerability / dodge check
+        if getattr(enemy, 'is_invulnerable', False) or enemy.is_dodging:
+            return result
+
+        result.hit = True
+        damage = float(raw_damage)
+
+        # Role damage multiplier
+        damage *= getattr(player, 'role_damage_mult', 1.0)
+
+        # Buff modifiers
+        if hasattr(player, 'buff_manager'):
+            damage = player.buff_manager.modify_damage_dealt(damage)
+
+        # Enemy blocking
+        if enemy.is_blocking:
+            damage *= (1.0 - BLOCK_DAMAGE_REDUCTION)
+            result.blocked = True
+            if hasattr(enemy, 'stamina_component'):
+                enemy.stamina_component.drain(BLOCK_STAMINA_CHIP)
+
+        # Apply damage
+        actual = enemy.take_damage(int(max(1, damage)))
+        result.damage = actual
+
+        # Knockback
+        direction = 1 if enemy.rect.centerx > player.rect.centerx else -1
+        enemy.apply_knockback(6 * direction)
+
+        return result
+
+    # ══════════════════════════════════════════════════════
     #  Enemy → Player Attack (called by AI system)
     # ══════════════════════════════════════════════════════
 

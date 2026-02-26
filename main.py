@@ -15,7 +15,7 @@ Integrates all systems:
 
 Run:  python main.py
 """
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 import pygame
 import sys
@@ -45,6 +45,8 @@ from systems.vfx_system import VFXSystem
 from systems.pvp_system import PVPManager
 from systems.projectile_system import ProjectileSystem, Projectile
 from systems.healthbar import draw_health_bars, _clear_cache as clear_healthbar_cache
+from systems.character_select import CharacterSelectScreen, PLAYER_ROLES, role_to_build_type
+from systems.ai_debug_overlay import AIDebugOverlay
 from utils import draw_text, draw_end_screen
 from utils.vfx import (
     draw_gradient, ScreenShake, FloatingTextManager, EffectsManager,
@@ -164,6 +166,9 @@ class Game:
         self._show_mode_select = True
         self._mode = "solo"            # "solo" | "pvp"
         self._show_menu = False        # avatar menu (Solo only)
+        self._show_char_select = False # character role select (Solo only)
+        self._char_select: CharacterSelectScreen | None = None
+        self._selected_role: dict | None = None
 
         # PVP manager (created on PVP start)
         self.pvp_manager: PVPManager | None = None
@@ -206,7 +211,7 @@ class Game:
         self.audio = AudioManager()
 
         # State
-        self.game_state = "MENU"   # "MENU" | "PLAYING" | "GAME_OVER"
+        self.game_state = "MENU"   # "MENU" | "CHARACTER_SELECT" | "PLAYING" | "GAME_OVER"
         self.running = True
         self.game_over = False
         self.winner_text = ""
@@ -220,6 +225,12 @@ class Game:
         # Buff drop pending
         self._buff_dropped = False
 
+        # AI debug overlay (F1 to toggle)
+        self.debug_overlay = AIDebugOverlay(self.screen)
+
+        # Simulation mode flag (set by SimulationRunner)
+        self.simulation_mode: bool = False
+
     # ── Solo-mode initialization ──────────────────────────
 
     def _init_solo(self):
@@ -227,11 +238,18 @@ class Game:
         self.player_style = self.analyzer.detect_player_style()
         logger.info("Detected player style: %s", self.player_style)
 
-        self.player = Player()
+        self.player = Player(role_config=self._selected_role)
         if self._avatar_surface:
             self.player.avatar_surface = self._avatar_surface
 
-        self.enemy = Enemy(player_style=self.player_style)
+        # Derive build_type from selected role for enemy AI adaptation
+        build_type = "BALANCED"
+        if self._selected_role:
+            build_type = role_to_build_type(self._selected_role.get("name", ""))
+            logger.info("Role '%s' → build_type '%s'",
+                        self._selected_role.get("name"), build_type)
+
+        self.enemy = Enemy(player_style=self.player_style, build_type=build_type)
 
         self.logger.start_match()
         self.match_stats = MatchStats(self.player_style, self.enemy.archetype)
@@ -254,6 +272,13 @@ class Game:
             if self.game_state == "MENU":
                 self._handle_home_events()
                 self._draw_home_screen()
+
+            elif self.game_state == "CHARACTER_SELECT":
+                self._handle_char_select_events()
+                if self._char_select:
+                    raw_dt = self.clock.get_time() / 1000.0
+                    self._char_select.update(raw_dt)
+                    self._char_select.draw()
 
             elif self.game_state == "PLAYING":
                 if self._show_mode_select:
@@ -336,7 +361,12 @@ class Game:
                 if event.key == pygame.K_1:
                     self._mode = "solo"
                     self._show_mode_select = False
-                    self._show_menu = True  # Go to avatar menu
+                    # Go to character role select screen
+                    self._char_select = CharacterSelectScreen(
+                        self.screen, PLAYER_ROLES,
+                    )
+                    self._show_char_select = True
+                    self.game_state = "CHARACTER_SELECT"
                 elif event.key == pygame.K_2:
                     self._mode = "pvp"
                     self._show_mode_select = False
@@ -345,6 +375,31 @@ class Game:
                     self._open_controls_menu()
                 elif event.key == pygame.K_ESCAPE:
                     self.game_state = "MENU"
+
+    # ── Character select (solo only) ──────────────────────
+
+    def _handle_char_select_events(self):
+        """Process events on the character selection screen."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                return
+            if self._char_select is None:
+                continue
+            result = self._char_select.handle_input(event)
+            if result == "confirmed":
+                self._selected_role = self._char_select.get_selected_role()
+                logger.info("Role selected: %s", self._selected_role)
+                self._show_char_select = False
+                # Proceed to avatar menu
+                self._show_menu = True
+                self.game_state = "PLAYING"
+            elif result == "back":
+                self._show_char_select = False
+                self._char_select = None
+                # Return to mode select
+                self._show_mode_select = True
+                self.game_state = "PLAYING"
 
     def _start_pvp(self):
         """Initialize PVP mode."""
@@ -540,12 +595,28 @@ class Game:
                         self.audio.play_sfx("combo_whoosh",
                                             x_pos=float(self.player.rect.centerx))
 
+                # Ability (Q key)
+                if event.key == pygame.K_q and not self.game_over:
+                    self._player_ability()
+
+                # Debug overlay toggle (F1)
+                if event.key == pygame.K_F1:
+                    self.debug_overlay.toggle()
+
                 # ESC → back to home screen
                 if event.key == pygame.K_ESCAPE:
                     self.game_state = "MENU"
                     self.player = None
                     self.enemy = None
                     self.game_over = False
+
+    def _player_ability(self):
+        """Attempt to activate the player's role ability (Q key)."""
+        if self.player is None:
+            return
+        if self.player.try_ability(target=self.enemy):
+            self.audio.play_sfx("combo_whoosh",
+                                x_pos=float(self.player.rect.centerx))
 
     def _player_attack(self):
         """Handle a player attack input."""
@@ -677,28 +748,48 @@ class Game:
             self.vfx.update(dt)
             return
 
-        # ── Player input ─────────────────────────────────
-        keys = pygame.key.get_pressed()
-        self.player.handle_input(keys)
+        # ── Player input (skipped in simulation mode) ─────
+        if not self.simulation_mode:
+            keys = pygame.key.get_pressed()
+            self.player.handle_input(keys)
 
-        # Block (held key)
-        block_pressed = keys[SOLO_KEYS["block"]]
-        was_blocking = self.player.is_blocking
-        self.player.try_block(block_pressed)
+            # Block (held key)
+            block_pressed = keys[SOLO_KEYS["block"]]
+            was_blocking = self.player.is_blocking
+            self.player.try_block(block_pressed)
 
-        # Register block start/end for parry detection
-        if self.player.is_blocking and not was_blocking:
-            self.combat.register_block_start(self.player)
-        elif not self.player.is_blocking and was_blocking:
-            self.combat.register_block_end(self.player)
+            # Register block start/end for parry detection
+            if self.player.is_blocking and not was_blocking:
+                self.combat.register_block_start(self.player)
+            elif not self.player.is_blocking and was_blocking:
+                self.combat.register_block_end(self.player)
+
+            # Log movement
+            if any(keys[k] for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
+                                      SOLO_KEYS["move_up"], SOLO_KEYS["move_down"])):
+                self.logger.log_movement()
 
         # Player animation update
         self.player.update_animation(dt)
 
-        # Log movement
-        if any(keys[k] for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
-                                  SOLO_KEYS["move_up"], SOLO_KEYS["move_down"])):
-            self.logger.log_movement()
+        # ── Player ability update ────────────────────────
+        if self.player.ability is not None:
+            self.player.ability.update(dt, self.player)
+            # Mage projectile spawning (auto-aim toward enemy)
+            from systems.ability_system import MageAbility
+            if isinstance(self.player.ability, MageAbility):
+                proj_data = self.player.ability.consume_projectile()
+                if proj_data is not None:
+                    px, py, tx, ty = proj_data
+                    self.projectiles.spawn_at(
+                        x=px, y=py,
+                        target_x=tx, target_y=ty,
+                        damage=PROJECTILE_DAMAGE,
+                        speed=PROJECTILE_SPEED,
+                        owner_id=id(self.player),
+                    )
+                    self.audio.play_sfx("combo_whoosh",
+                                        x_pos=px)
 
         # ── Stamina system update ────────────────────────
         self.stamina_system.update(self.player, dt)
@@ -712,11 +803,15 @@ class Game:
         prev_state = self.enemy.state
 
         # Pass player activity info to enemy
-        player_is_active = (
-            any(keys[k] for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
-                                  SOLO_KEYS["move_up"], SOLO_KEYS["move_down"]))
-            or self.player.is_attacking
-        )
+        if self.simulation_mode:
+            player_is_active = self.player.is_attacking
+        else:
+            player_is_active = (
+                any(pygame.key.get_pressed()[k]
+                    for k in (SOLO_KEYS["move_left"], SOLO_KEYS["move_right"],
+                              SOLO_KEYS["move_up"], SOLO_KEYS["move_down"]))
+                or self.player.is_attacking
+            )
         self.enemy.clock_dt = dt
         self.enemy.update(self.player, player_is_active=player_is_active, dt=dt)
 
@@ -808,6 +903,31 @@ class Game:
 
         # ── Projectile update & collision ────────────────
         self.projectiles.update(dt)
+
+        # Player projectiles → enemy
+        player_proj_hits = self.projectiles.check_collisions(self.enemy)
+        for proj in player_proj_hits:
+            result = self.combat.player_projectile_hit(self.player, self.enemy, proj.damage)
+            if result.hit and result.damage > 0:
+                ex = self.enemy.rect.centerx
+                ey = self.enemy.rect.centery
+                self.vfx.spawn_magic_impact(float(ex), float(ey))
+                self.vfx.spawn_hit_flash(float(ex), float(ey))
+                self.floating_texts.spawn(
+                    f"-{result.damage}", ex - 12,
+                    self.enemy.rect.top - 10,
+                    color=(100, 180, 255), size=26,
+                )
+                self.screen_shake.trigger(intensity=5, duration=0.12)
+                self.impact_flash.trigger(
+                    color=(100, 180, 255), alpha=80, duration=0.1,
+                )
+                self.audio.play_sfx("light_hit", x_pos=float(ex))
+                if self.match_stats:
+                    self.match_stats.record_player_damage(result.damage)
+                logger.debug("Player projectile hit enemy for %d damage", result.damage)
+
+        # Enemy projectiles → player
         proj_hits = self.projectiles.check_collisions(self.player)
         for proj in proj_hits:
             # Apply projectile damage through CombatSystem
@@ -1203,6 +1323,11 @@ class Game:
         if self.game_over and not self.final_hit.active:
             draw_end_screen(self.screen, self.winner_text)
 
+        # AI debug overlay (drawn last, on top of everything)
+        ai_brain = getattr(self.enemy, 'ai_controller', None) if self.enemy else None
+        self.debug_overlay.update(raw_dt)
+        self.debug_overlay.draw(ai_brain, self.player, self.enemy)
+
         pygame.display.flip()
 
     def _draw_world(self, surface, dt: float = 0.016):
@@ -1309,9 +1434,27 @@ class Game:
 
 # ── Run ───────────────────────────────────────────────────
 if __name__ == "__main__":
+    import argparse
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    Game().run()
+
+    parser = argparse.ArgumentParser(description="AI Learning Opponent")
+    parser.add_argument(
+        "--simulate", type=int, default=0, metavar="N",
+        help="Run N automated AI-vs-AI matches (rendered, no input needed).",
+    )
+    args = parser.parse_args()
+
+    if args.simulate > 0:
+        from ai.simulation_runner import SimulationRunner
+        game = Game()
+        runner = SimulationRunner(game, n_matches=args.simulate)
+        runner.run()
+        pygame.quit()
+        sys.exit(0)
+    else:
+        Game().run()

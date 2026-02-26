@@ -16,13 +16,14 @@ from settings import (
 from entities.character import Character
 from systems.stamina_system import StaminaComponent
 from systems.buff_system import BuffManager
+from systems.ability_system import Ability, create_ability
 from keybinds import SOLO_KEYS
 
 
 class Player(Character):
     """Player-controlled pixel knight."""
 
-    def __init__(self):
+    def __init__(self, role_config: dict | None = None):
         super().__init__(
             x=PLAYER_START_X,
             y=PLAYER_START_Y,
@@ -46,6 +47,33 @@ class Player(Character):
 
         # Avatar head (None = use default pixel sprite)
         self.avatar_surface: pygame.Surface | None = None
+
+        # Role config (from CharacterSelectScreen)
+        self.role_config: dict | None = role_config
+        self.role_name: str = "Default"
+        self.role_damage_mult: float = 1.0
+        self.role_defense_mult: float = 1.0
+        self.ability: Ability | None = None
+        if role_config:
+            self._apply_role(role_config)
+
+    def _apply_role(self, cfg: dict) -> None:
+        """Override base stats from a role config dict."""
+        self.role_name = cfg.get("name", "Default")
+
+        # Speed: role value mapped onto a 1-10 range around PLAYER_SPEED
+        if "speed" in cfg:
+            self.base_speed = PLAYER_SPEED + (cfg["speed"] - 5)
+            self.speed = self.base_speed
+
+        # Damage: stored as a multiplier so combat can consume it
+        self.role_damage_mult: float = cfg.get("damage", 10) / 10.0
+
+        # Defense: stored as a damage-reduction fraction (0-1)
+        self.role_defense_mult: float = 1.0 - (cfg.get("defense", 5) * 0.04)
+
+        # Role ability (factory-created, no conditionals here)
+        self.ability = create_ability(self.role_name)
 
     # ── Movement ──────────────────────────────────────────
 
@@ -127,6 +155,14 @@ class Player(Character):
         else:
             direction = -self.facing  # dodge backward
         return self.start_dodge(direction)
+
+    # ── Ability ────────────────────────────────────────────
+
+    def try_ability(self, **kwargs) -> bool:
+        """Attempt to activate the role ability.  Returns True on success."""
+        if self.ability is None:
+            return False
+        return self.ability.activate(self, **kwargs)
 
     # ── Draw override ─────────────────────────────────────
 
